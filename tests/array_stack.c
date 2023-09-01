@@ -3,11 +3,34 @@
 
 #include "os.h"
 
+static bool fail_next_memory_realloc = false;
+extern void *__real_memory_realloc(void *address, u64 prev, u64 new);
+extern void *__wrap_memory_realloc(void *address, u64 prev, u64 new);
+extern void *__wrap_memory_realloc(void *address, u64 prev, u64 new) {
+  if (fail_next_memory_realloc) {
+    fail_next_memory_realloc = false;
+    return NULL;
+  }
+  return __real_memory_realloc(address, prev, new);
+}
+
 int main(void) {
   CHECK_START();
 
   {
     u8 *mem = NULL;
+    fail_next_memory_realloc = true;
+    CHECK(array_stack_push_back(mem, 1), ==, false);
+    CHECK(mem, ==, NULL);
+    CHECK(array_stack_push_back(mem, 1), ==, true);
+    CHECK(mem, !=, NULL);
+    array_stack_free(mem);
+  }
+
+  {
+    u8 *mem = NULL;
+    array_stack_free(mem);
+    CHECK(mem, ==, NULL);
     array_stack_push_back(mem, 1);
     CHECK(mem[0], ==, 1);
     array_stack_push_back(mem, 2);
@@ -61,16 +84,15 @@ int main(void) {
   }
 
   {
-    struct {
-      u8 buffer[512];
-    } *mem = NULL, item = {0};
-
-    while (array_stack_push_back(mem, item)) {
+    u16 *mem = NULL;
+    while (array_stack_push_back(mem, 1)) {
       CHECK(mem, !=, NULL);
+      fail_next_memory_realloc = true;
     }
     CHECK(mem, !=, NULL);
-    CHECK(array_stack_header(mem)->end, !=, 0);
-    CHECK(array_stack_header(mem)->capacity, !=, 0);
+    CHECK(array_stack_header(mem)->end, ==, 32);
+    CHECK(array_stack_header(mem)->capacity, ==, 32);
+    CHECK(array_stack_full(mem), ==, true);
     array_stack_free(mem);
   }
   CHECK_END();

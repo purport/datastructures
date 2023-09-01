@@ -34,7 +34,7 @@ static void *array_stack_grow(void *a, u64 header_size, u64 item_size) {
       s = memory_realloc(s, header_size + s->capacity * item_size,
                          header_size + 2 * s->capacity * item_size);
       if (s == NULL) {
-        return NULL;
+        return a;
       }
       s->capacity *= 2;
     }
