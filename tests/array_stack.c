@@ -58,12 +58,24 @@ int main(void) {
 
   {
     u32 *mem = NULL;
+    u32 val = 0;
+    CHECK(array_stack_try_pop_back(mem, val), ==, false);
+    CHECK(array_stack_push_back(mem, 1), ==, true);
+    CHECK(array_stack_try_pop_back(mem, val), ==, true);
+    CHECK(val, ==, 1);
+  }
+  {
+    u32 *mem = NULL;
     CHECK(array_stack_empty(mem), ==, true);
+    CHECK(array_stack_full(mem), ==, true);
     array_stack_push_back(mem, 0);
     CHECK(array_stack_empty(mem), ==, false);
+    CHECK(array_stack_full(mem), ==, false);
     array_stack_pop_back(mem);
     CHECK(array_stack_empty(mem), ==, true);
+    CHECK(array_stack_full(mem), ==, false);
     array_stack_free(mem);
+    CHECK(array_stack_full(mem), ==, true);
   }
 
   {

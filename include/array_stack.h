@@ -55,3 +55,6 @@ static void *array_stack_grow(void *a, u64 header_size, u64 item_size) {
 
 #define array_stack_pop_back(a) \
   ((void)ASSERT(!array_stack_empty(a)), a[--array_stack_header(a)->end])
+
+#define array_stack_try_pop_back(a, var) \
+  (!array_stack_empty(a) ? (var = a[--array_stack_header(a)->end], true) : false)
