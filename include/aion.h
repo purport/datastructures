@@ -242,11 +242,6 @@ void *pool_alloc_aligned(struct pool *pool, u64 size, u64 align) {
 
 // Array Stack
 
-#define push  array_stack_push_back
-#define pop   array_stack_pop_back
-#define peek  array_stack_peek_back
-#define empty array_stack_empty
-
 struct array_stack {
   u64 end, capacity;
 };
@@ -257,12 +252,13 @@ struct array_stack {
 #define array_stack_header(a) \
   ((struct array_stack *)OFFSETBY(a, -array_stack_header_size(a)))
 
-#define array_stack_free(a)                               \
-  do {                                                    \
-    if (a == NULL) break;                                 \
-    struct array_stack *s__ = array_stack_header(a);      \
-    memory_realloc(s__, s__->capacity * sizeof(a[0]), 0); \
-    a = NULL;                                             \
+#define array_stack_free(a)                                                 \
+  do {                                                                      \
+    if (a == NULL) break;                                                   \
+    struct array_stack *s__ = array_stack_header(a);                        \
+    memory_realloc(                                                         \
+        s__, array_stack_header_size(a) + s__->capacity * sizeof(a[0]), 0); \
+    a = NULL;                                                               \
   } while (0)
 
 #define array_stack_full(a) \
@@ -314,6 +310,92 @@ void *array_stack_grow(void *a, u64 header_size, u64 item_size) {
         return a;
       }
       s->capacity *= 2;
+    }
+  }
+  return OFFSETBY(s, header_size);
+}
+
+#endif
+
+// Array Gap Buffer
+
+struct array_gap {
+  u64 capacity;
+  u64 cursor, end;
+};
+
+#define array_gap_header_size(a) \
+  ALIGNUP(sizeof(struct array_gap), ALIGNOF(__typeof__(a[0])))
+
+#define array_gap_header(a) \
+  ((struct array_gap *)OFFSETBY(a, -array_gap_header_size(a)))
+
+#define array_gap_free(a)                                                 \
+  do {                                                                    \
+    if (a == NULL) break;                                                 \
+    struct array_gap *s__ = array_gap_header(a);                          \
+    memory_realloc(                                                       \
+        s__, array_gap_header_size(a) + s__->capacity * sizeof(a[0]), 0); \
+    a = NULL;                                                             \
+  } while (0)
+
+#define array_gap_full(a) \
+  ((a) == NULL || array_gap_header(a)->cursor == array_gap_header(a)->end)
+
+#define array_gap_insert(a, ch)                                           \
+  ((void)(a = array_gap_grow(a, array_gap_header_size(a), sizeof(a[0]))), \
+   array_gap_full(a)                                                      \
+       ? false                                                            \
+       : ((void)(a[array_gap_header(a)->cursor++] = (ch)), true))
+
+#define array_gap_cursor_left(a)                        \
+  ((a) == NULL || array_gap_header(a)->cursor == 0      \
+       ? false                                          \
+       : ((void)(a[--array_gap_header(a)->end] =        \
+                     a[--array_gap_header(a)->cursor]), \
+          true))
+
+#define array_gap_cursor_right(a)                                           \
+  ((a) == NULL || array_gap_header(a)->end == array_gap_header(a)->capacity \
+       ? false                                                              \
+       : ((void)(a[array_gap_header(a)->cursor++] =                         \
+                     a[array_gap_header(a)->end++]),                        \
+          true))
+
+#define array_gap_delete(a)                        \
+  ((a) == NULL || array_gap_header(a)->cursor == 0 \
+       ? false                                     \
+       : (array_gap_header(a)->cursor--, true))
+
+extern void *array_gap_grow(void *a, u64 header_size, u64 item_size);
+
+#ifdef AION_IMPLEMENTATION
+
+void *array_gap_grow(void *a, u64 header_size, u64 item_size) {
+  struct array_gap *s = NULL;
+  if (a == NULL) {
+    s = memory_realloc(NULL, 0, header_size + 32 * item_size);
+    if (s == NULL) {
+      return NULL;
+    }
+    s->cursor = 0;
+    s->capacity = s->end = 32;
+  } else {
+    s = OFFSETBY(a, -header_size);
+    if (s->cursor == s->end) {
+      s = memory_realloc(s, header_size + s->capacity * item_size,
+                         header_size + 2 * s->capacity * item_size);
+      if (s == NULL) {
+        return a;
+      }
+      u64 end_count = s->capacity - s->end;
+      s->capacity *= 2;
+
+      // this could be a memcpy, as we are doubling the capacity each time.
+      memmove(OFFSETBY(s, header_size + (s->capacity - end_count) * item_size),
+              OFFSETBY(a, s->end * item_size), end_count * item_size);
+
+      s->end = s->capacity - end_count;
     }
   }
   return OFFSETBY(s, header_size);
@@ -405,599 +487,6 @@ struct string *strings_intern(struct strings *strings, u32 hash, u64 count,
     }
     return s;
   }
-}
-
-#endif
-
-// Scanner
-
-struct token {
-  enum token_kind : u32 {
-    TOKEN_UNKNOWN,
-    TOKEN_PLUS,
-    TOKEN_MINUS,
-    TOKEN_NEGATIVE,
-    TOKEN_MULTIPLY,
-    TOKEN_DIVIDE,
-    TOKEN_POWER,
-    TOKEN_EQ,
-    TOKEN_GT,
-    TOKEN_GEQ,
-    TOKEN_LT,
-    TOKEN_LEQ,
-    TOKEN_PAREN_OPEN,
-    TOKEN_PAREN_CLOSE,
-    TOKEN_BRACE_OPEN,
-    TOKEN_BRACE_CLOSE,
-    TOKEN_SEMI,
-    TOKEN_INTEGER,
-    TOKEN_IDENT,
-    TOKEN_LET,
-    TOKEN_FUN,
-    TOKEN_END,
-  } kind;
-  union {
-    u64 ident_index;
-    u64 integer_index;
-  };
-};
-
-struct program {
-  struct strings strings;
-  struct token *tokens;
-
-  struct integer {
-    u64 val;
-    bool overflow;
-    u8 padding[7];
-  } *integers;
-
-  struct ident {
-    struct string *name;
-  } *idents;
-
-  struct node {
-    enum node_kind {
-      NODE_UNKNOWN,
-      NODE_LET_INTRODUCER,
-      NODE_LET_INITIALIZER,
-      NODE_LET,
-      NODE_BINDING,
-      NODE_EXPR_UNARY,
-      NODE_EXPR_BINARY,
-      NODE_EXPR_IDENT,
-      NODE_EXPR_INTEGER,
-    } kind;
-    u64 token;
-  } *nodes;
-};
-
-extern void scanner_tokenize(struct program *ctx, u64 input_count, c8 *input);
-
-#ifdef AION_IMPLEMENTATION
-
-static struct integer scanner__integer(u64 input_count, c8 *input, u64 *begin,
-                                       c8 ch0) {
-  // TODO: other bases, decimals, negatives?
-  struct integer n = {(u64)ch0 - '0', false, {0}};
-  u64 i = *begin;
-  while (i != input_count) {
-    c8 ch = input[i++];
-    switch (ch) {
-      case '0' ... '9':
-        n.overflow |= __builtin_umull_overflow(n.val, 10, &n.val);
-        n.overflow |= __builtin_uaddl_overflow(n.val, (u64)ch - '0', &n.val);
-        *begin = i;
-        continue;
-    }
-    break;
-  }
-  return n;
-}
-
-static struct ident scanner__ident(struct strings *strings, u64 input_count,
-                                   c8 *input, u64 *i, c8 ch0) {
-  struct murmur3 hash = {0};
-  hash_murmur3(&hash, (u8)ch0);
-  u64 begin = *i - 1;
-  while (*i != input_count) {
-    c8 ch = input[*i];
-    switch (ch) {
-      case '_':
-      case 'a' ... 'z':
-      case 'A' ... 'Z':
-      case '0' ... '9':
-        hash_murmur3(&hash, (u8)ch);
-        *i = *i + 1;
-        continue;
-    }
-    break;
-  }
-  struct ident id = {
-      strings_intern(strings, hash_murmur3_fin(&hash), *i - begin,
-                     &input[begin]),
-  };
-  return id;
-}
-
-void scanner_tokenize(struct program *ctx, u64 input_count, c8 *input) {
-  enum keyword : u8 {
-    KEYWORD_LET,
-    KEYWORD_FUN,
-    KEYWORD_COUNT,
-  };
-  struct string *keywords[KEYWORD_COUNT];
-  for (enum keyword keyword = 0; keyword != KEYWORD_COUNT; ++keyword) {
-    switch (keyword) {
-      case KEYWORD_LET:
-        keywords[keyword] = strings_intern_cstring(&ctx->strings, "let");
-        push(ctx->idents, (struct ident){keywords[keyword]});
-        break;
-      case KEYWORD_FUN:
-        keywords[keyword] = strings_intern_cstring(&ctx->strings, "fun");
-        push(ctx->idents, (struct ident){keywords[keyword]});
-        break;
-      case KEYWORD_COUNT: ASSERT(false);
-    }
-  }
-
-  u64 i = 0;
-  enum token_kind prev_kind = TOKEN_UNKNOWN;
-  while (i != input_count) {
-    c8 ch = input[i++];
-    struct token token = {0};
-    switch (ch) {
-      case '+': token.kind = TOKEN_PLUS; break;
-      case '-':
-        token.kind = prev_kind != TOKEN_IDENT && prev_kind != TOKEN_INTEGER
-                         ? TOKEN_NEGATIVE
-                         : TOKEN_MINUS;
-        break;
-      case '*': token.kind = TOKEN_MULTIPLY; break;
-      case '/': token.kind = TOKEN_DIVIDE; break;
-      case '=': token.kind = TOKEN_EQ; break;
-      case '(': token.kind = TOKEN_PAREN_OPEN; break;
-      case ')': token.kind = TOKEN_PAREN_CLOSE; break;
-      case '{': token.kind = TOKEN_BRACE_OPEN; break;
-      case '}': token.kind = TOKEN_BRACE_CLOSE; break;
-      case '>':
-        token.kind = TOKEN_GT;
-        if (i != input_count && input[i] == '=') {
-          token.kind = TOKEN_GEQ;
-          ++i;
-        }
-        break;
-      case '<':
-        token.kind = TOKEN_LT;
-        if (i != input_count && input[i] == '=') {
-          token.kind = TOKEN_LEQ;
-          ++i;
-        }
-        break;
-      case '0' ... '9':
-        token.kind = TOKEN_INTEGER;
-        token.integer_index = array_stack_count(ctx->integers);
-        push(ctx->integers, scanner__integer(input_count, input, &i, ch));
-        break;
-      case '_':
-      case 'a' ... 'z':
-      case 'A' ... 'Z':
-        token.kind = TOKEN_IDENT;
-        struct ident id =
-            scanner__ident(&ctx->strings, input_count, input, &i, ch);
-        for (enum keyword keyword = 0; keyword != KEYWORD_COUNT; ++keyword) {
-          if (keywords[keyword] == id.name) {
-            token.kind = TOKEN_LET + keyword;
-            token.ident_index = (u64)keyword;
-            break;
-          }
-        }
-
-        if (token.kind == TOKEN_IDENT) {
-          token.ident_index = array_stack_count(ctx->idents);
-          push(ctx->idents, id);
-        }
-        break;
-      case ' ':
-      case '\0': continue;
-      default: token.kind = TOKEN_UNKNOWN; break;
-    }
-    push(ctx->tokens, token);
-    prev_kind = token.kind;
-  }
-  push(ctx->tokens, ((struct token){.kind = TOKEN_END}));
-}
-
-#endif
-
-extern u64 parser_print_token(struct program *p, u64 t, u64 n, c8 *str);
-extern u64 parse_print_nodes(struct program *p, u64 n, c8 *str,
-                             u64 graph_count);
-extern void parser_parse(struct program *p);
-
-#ifdef AION_IMPLEMENTATION
-
-u64 parser_print_token(struct program *p, u64 t, u64 n, c8 *str) {
-  struct token token = p->tokens[t];
-  switch (token.kind) {
-    case TOKEN_UNKNOWN: n = snprintf(str, n, "Unknown"); break;
-    case TOKEN_PLUS: n = snprintf(str, n, "+"); break;
-    case TOKEN_NEGATIVE: n = snprintf(str, n, "-"); break;
-    case TOKEN_MINUS: n = snprintf(str, n, "-"); break;
-    case TOKEN_MULTIPLY: n = snprintf(str, n, "*"); break;
-    case TOKEN_DIVIDE: n = snprintf(str, n, "/"); break;
-    case TOKEN_POWER: n = snprintf(str, n, "^"); break;
-    case TOKEN_EQ: n = snprintf(str, n, "="); break;
-    case TOKEN_GT: n = snprintf(str, n, ">"); break;
-    case TOKEN_GEQ: n = snprintf(str, n, ">="); break;
-    case TOKEN_LT: n = snprintf(str, n, "<"); break;
-    case TOKEN_LEQ: n = snprintf(str, n, "<="); break;
-    case TOKEN_PAREN_OPEN: n = snprintf(str, n, "("); break;
-    case TOKEN_PAREN_CLOSE: n = snprintf(str, n, ")"); break;
-    case TOKEN_BRACE_OPEN: n = snprintf(str, n, "{"); break;
-    case TOKEN_BRACE_CLOSE: n = snprintf(str, n, "}"); break;
-    case TOKEN_INTEGER:
-      n = snprintf(str, n, "%lu", p->integers[token.integer_index].val);
-      break;
-    case TOKEN_IDENT:
-    case TOKEN_LET:
-    case TOKEN_FUN:
-      n = snprintf(str, n, "%s", p->idents[token.ident_index].name->val);
-      break;
-    case TOKEN_SEMI: n = snprintf(str, n, ";"); break;
-    case TOKEN_END: n = snprintf(str, n, "$"); break;
-  }
-  return n;
-}
-
-u64 parse_print_nodes(struct program *p, u64 l, c8 *str, u64 graph_count) {
-  u64 *stack = 0;
-#define ATTR "color=\"white\" fontcolor=\"white\""
-
-  u64 c = 0;
-  c += snprintf(str + c, l - c, "digraph G_%lu {\nbgcolor=\"transparent\"\n",
-                graph_count);
-  array_stack_for(p->nodes, n) {
-    struct node node = p->nodes[n];
-    switch (node.kind) {
-      case NODE_LET_INTRODUCER: {
-        push(stack, n);
-        c += snprintf(str + c, l - c,
-                      "_%lx_%lx [label=\"let introducer: ", graph_count, n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-      } break;
-      case NODE_LET_INITIALIZER: {
-        push(stack, n);
-        c += snprintf(str + c, l - c,
-                      "_%lx_%lx [label=\"let initalizer: ", graph_count, n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-      } break;
-      case NODE_LET: {
-        u64 expression = pop(stack);
-        u64 binding = pop(stack);
-        u64 initializer = pop(stack);
-        u64 introducer = pop(stack);
-        push(stack, n);
-        c +=
-            snprintf(str + c, l - c, "_%lx_%lx [label=\"let: ", graph_count, n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, n, graph_count, (u64)introducer);
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, n, graph_count, (u64)initializer);
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, n, graph_count, (u64)binding);
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, n, graph_count, (u64)expression);
-      } break;
-      case NODE_BINDING: {
-        push(stack, n);
-        c += snprintf(str + c, l - c,
-                      "_%lx_%lx [label=\"binding: ", graph_count, (u64)n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-      } break;
-      case NODE_EXPR_BINARY: {
-        u64 right = pop(stack);
-        u64 left = pop(stack);
-        push(stack, n);
-        c += snprintf(str + c, l - c,
-                      "_%lx_%lx [label=\"expr binary: ", graph_count, (u64)n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, (u64)n, graph_count, (u64)left);
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, (u64)n, graph_count, (u64)right);
-      } break;
-      case NODE_EXPR_UNARY: {
-        u64 right = pop(stack);
-        push(stack, n);
-        c += snprintf(str + c, l - c,
-                      "_%lx_%lx [label=\"expr unary: ", graph_count, (u64)n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-        c += snprintf(str + c, l - c, "_%lx_%lx -> _%lx_%lx [" ATTR "]\n",
-                      graph_count, (u64)n, graph_count, (u64)right);
-      } break;
-      case NODE_EXPR_IDENT:
-      case NODE_EXPR_INTEGER:
-        push(stack, n);
-        c +=
-            snprintf(str + c, l - c, "_%lx_%lx [label=\"", graph_count, (u64)n);
-        c += parser_print_token(p, node.token, l - c, str + c);
-        c += snprintf(str + c, l - c, "\"" ATTR "]\n");
-        break;
-      case NODE_UNKNOWN: ASSERT(false); break;
-    }
-  }
-
-#undef ATTR
-  l = snprintf(str + c, l, "}");
-  array_stack_free(stack);
-  return l;
-}
-
-void parser_parse(struct program *p) {
-  enum state : u32 {
-    STATE_L0,
-    STATE_LET,
-    STATE_LET_BINDING,
-    STATE_LET_AFTER_BINDING,
-    STATE_LET_FINISH,
-    STATE_EXPR,
-    STATE_END,
-  } *states = NULL;
-
-  // clang-format off
-  static struct parse_info {
-    u8 prec;
-    enum node_kind kind;
-    enum assoc { ASSOC_LEFT, ASSOC_RIGHT } assoc;
-  } parse_info[] = {
-      [TOKEN_EQ] = {.prec = 1, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_RIGHT},
-      [TOKEN_MINUS] = {.prec = 4, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_LEFT},
-      [TOKEN_PLUS] = {.prec = 4, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_LEFT},
-      [TOKEN_MULTIPLY] = {.prec = 8, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_LEFT},
-      [TOKEN_DIVIDE] = {.prec = 8, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_LEFT},
-      [TOKEN_POWER] = {.prec = 16, .kind = NODE_EXPR_BINARY, .assoc = ASSOC_RIGHT},
-      [TOKEN_NEGATIVE] = {.prec = 16, .kind = NODE_EXPR_UNARY, .assoc = ASSOC_RIGHT},
-  };
-  // clang-format on
-
-  u64 *operators = NULL;
-
-  push(states, STATE_END);
-  push(states, STATE_L0);
-
-  u64 i = 0;
-  while (!empty(states)) {
-    enum state state = pop(states);
-    struct token t = p->tokens[i];
-
-    switch (state) {
-      case STATE_L0: {
-        if (t.kind == TOKEN_LET) {
-          push(states, STATE_LET);
-        } else {
-          push(states, STATE_EXPR);
-        }
-      } break;
-      case STATE_LET: {
-        push(states, STATE_LET_FINISH);
-        push(states, STATE_LET_AFTER_BINDING);
-        push(states, STATE_LET_BINDING);
-
-        struct node node = {.kind = NODE_LET_INTRODUCER, .token = i++};
-        push(p->nodes, node);
-      } break;
-      case STATE_LET_BINDING: {
-        if (t.kind == TOKEN_IDENT) {
-          struct node node = {.kind = NODE_BINDING, .token = i++};
-          push(p->nodes, node);
-        } else {
-          // syntax error
-          ASSERT(false);
-        }
-      } break;
-      case STATE_LET_AFTER_BINDING: {
-        if (t.kind == TOKEN_EQ) {
-          push(states, STATE_EXPR);
-
-          struct node node = {.kind = NODE_LET_INITIALIZER, .token = i++};
-          push(p->nodes, node);
-        } else {
-          // syntax error
-          ASSERT(false);
-        }
-      } break;
-      case STATE_LET_FINISH: {
-        if (t.kind == TOKEN_SEMI) {
-          struct node node = {.kind = NODE_LET, .token = i++};
-          push(p->nodes, node);
-        } else {
-          // syntax error
-          ASSERT(false);
-        }
-      } break;
-      case STATE_EXPR: {
-        bool end = false;
-        // TODO: syntax errors
-        do {
-          switch (t.kind) {
-            case TOKEN_PLUS:
-            case TOKEN_MINUS:
-            case TOKEN_MULTIPLY:
-            case TOKEN_DIVIDE:
-            case TOKEN_POWER: {
-              struct parse_info p1 = parse_info[t.kind];
-              while (!empty(operators)) {
-                struct parse_info p2 =
-                    parse_info[p->tokens[peek(operators)].kind];
-                if (p2.prec > p1.prec ||
-                    p2.prec == p1.prec && p1.assoc == ASSOC_LEFT) {
-                  struct node node = {.kind = p2.kind, .token = pop(operators)};
-                  push(p->nodes, node);
-                  continue;
-                }
-                break;
-              }
-              push(operators, i);
-            } break;
-            case TOKEN_NEGATIVE: {
-              struct parse_info p1 = parse_info[t.kind];
-              while (!empty(operators)) {
-                struct parse_info p2 =
-                    parse_info[p->tokens[peek(operators)].kind];
-                if (p2.prec > p1.prec ||
-                    p2.prec == p1.prec && p1.assoc == ASSOC_LEFT) {
-                  struct node node = {.kind = p2.kind, .token = pop(operators)};
-                  push(p->nodes, node);
-                  continue;
-                }
-                break;
-              }
-              push(operators, i);
-            } break;
-            case TOKEN_INTEGER: {
-              struct node node = {.kind = NODE_EXPR_INTEGER, .token = i};
-              push(p->nodes, node);
-            } break;
-            case TOKEN_IDENT: {
-              struct node node = {.kind = NODE_EXPR_IDENT, .token = i};
-              push(p->nodes, node);
-            } break;
-            case TOKEN_UNKNOWN:
-            case TOKEN_EQ:
-            case TOKEN_GT:
-            case TOKEN_GEQ:
-            case TOKEN_LT:
-            case TOKEN_LEQ:
-            case TOKEN_PAREN_OPEN:
-            case TOKEN_PAREN_CLOSE:
-            case TOKEN_BRACE_OPEN:
-            case TOKEN_BRACE_CLOSE: ASSERT(false); break;
-            case TOKEN_SEMI:
-            case TOKEN_LET:
-            case TOKEN_FUN:
-            case TOKEN_END: end = true; break;
-          }
-          if (!end) {
-            t = p->tokens[++i];
-          }
-        } while (!end);
-
-        while (!empty(operators)) {
-          u64 op = pop(operators);
-          struct node node = {.kind = parse_info[p->tokens[op].kind].kind,
-                              .token = op};
-          push(p->nodes, node);
-        }
-      } break;
-      case STATE_END: break;
-    }
-  }
-  array_stack_free(operators);
-}
-
-#endif
-
-// Interpreter
-
-extern u64 interpret_program(struct program *p);
-
-#ifdef AION_IMPLEMENTATION
-
-u64 interpret_program(struct program *p) {
-  u64 *stack = 0;
-  array_stack_for(p->nodes, n) {
-    struct node node = p->nodes[n];
-    switch (node.kind) {
-      case NODE_LET_INTRODUCER: {
-        push(stack, n);
-      } break;
-      case NODE_LET_INITIALIZER: {
-        push(stack, n);
-      } break;
-      case NODE_LET: {
-        u64 expression = pop(stack);
-        u64 binding = pop(stack);
-        u64 initializer = pop(stack);
-        u64 introducer = pop(stack);
-        ASSERT(false);
-      } break;
-      case NODE_BINDING: {
-        push(stack, n);
-      } break;
-      case NODE_EXPR_BINARY: {
-        u64 right = pop(stack);
-        u64 left = pop(stack);
-        switch (p->tokens[node.token].kind) {
-          case TOKEN_PLUS: push(stack, left + right); break;
-          case TOKEN_MINUS: push(stack, left - right); break;
-          case TOKEN_MULTIPLY: push(stack, left * right); break;
-          case TOKEN_DIVIDE: push(stack, left / right); break;
-          case TOKEN_POWER: ASSERT(false); break;
-          case TOKEN_NEGATIVE:
-          case TOKEN_EQ:
-          case TOKEN_GT:
-          case TOKEN_GEQ:
-          case TOKEN_LT:
-          case TOKEN_LEQ:
-          case TOKEN_PAREN_OPEN:
-          case TOKEN_PAREN_CLOSE:
-          case TOKEN_BRACE_OPEN:
-          case TOKEN_BRACE_CLOSE:
-          case TOKEN_SEMI:
-          case TOKEN_INTEGER:
-          case TOKEN_IDENT:
-          case TOKEN_LET:
-          case TOKEN_FUN:
-          case TOKEN_END:
-          case TOKEN_UNKNOWN: ASSERT(false); break;
-        }
-      } break;
-      case NODE_EXPR_UNARY: {
-        u64 right = pop(stack);
-        switch (p->tokens[node.token].kind) {
-          case TOKEN_NEGATIVE: push(stack, -right); break;
-          case TOKEN_PLUS:
-          case TOKEN_MINUS:
-          case TOKEN_MULTIPLY:
-          case TOKEN_DIVIDE:
-          case TOKEN_POWER:
-          case TOKEN_EQ:
-          case TOKEN_GT:
-          case TOKEN_GEQ:
-          case TOKEN_LT:
-          case TOKEN_LEQ:
-          case TOKEN_PAREN_OPEN:
-          case TOKEN_PAREN_CLOSE:
-          case TOKEN_BRACE_OPEN:
-          case TOKEN_BRACE_CLOSE:
-          case TOKEN_SEMI:
-          case TOKEN_INTEGER:
-          case TOKEN_IDENT:
-          case TOKEN_LET:
-          case TOKEN_FUN:
-          case TOKEN_END:
-          case TOKEN_UNKNOWN: ASSERT(false); break;
-        }
-      } break;
-      case NODE_EXPR_IDENT: ASSERT(false); break;
-      case NODE_EXPR_INTEGER:
-        push(stack, p->integers[p->tokens[node.token].integer_index].val);
-        break;
-      case NODE_UNKNOWN: ASSERT(false); break;
-    }
-  }
-  ASSERT(array_stack_count(stack) == 1);
-  u64 result = pop(stack);
-  array_stack_free(stack);
-  return result;
 }
 
 #endif

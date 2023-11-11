@@ -41,6 +41,10 @@ build tests/array_stack_test: exe ../tests/array_stack_test.c | include/aion.h.p
   pch = include/aion.h.pch
 build array_stack_test: run tests/array_stack_test
 
+build tests/array_gap_test: exe ../tests/array_gap_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build array_gap_test: run tests/array_gap_test
+
 build tests/pool_test: exe ../tests/pool_test.c | include/aion.h.pch
   pch = include/aion.h.pch
 build pool_test: run tests/pool_test

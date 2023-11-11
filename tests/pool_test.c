@@ -47,8 +47,8 @@ s32 main(void) {
     typedef double v4d __attribute__((vector_size(32)));
     _Static_assert(_Alignof(int) == 4, "Ints have 4 byte alignment");
     _Static_assert(_Alignof(long) == 8, "Longs have 8 byte alignment");
-    _Static_assert(_Alignof(__int128) == 16, "Longs have 8 byte alignment");
-    _Static_assert(_Alignof(v4d) == 32, "Longs have 8 byte alignment");
+    _Static_assert(_Alignof(__int128) == 16, "Int128 have 16 byte alignment");
+    _Static_assert(_Alignof(v4d) == 32, "v4d have 32 byte alignment");
     struct pool p = {.size = PAGESIZE};
 
     for (int i = 0; i != 16; ++i) {
