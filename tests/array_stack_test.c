@@ -1,30 +1,38 @@
-#include <array_stack.h>
-#include <check.h>
+#include <aion.h>
 
-#include "os.h"
-
-static bool fail_next_memory_realloc = false;
-extern void *__real_memory_realloc(void *address, u64 prev, u64 new);
-extern void *__wrap_memory_realloc(void *address, u64 prev, u64 new);
-extern void *__wrap_memory_realloc(void *address, u64 prev, u64 new) {
-  if (fail_next_memory_realloc) {
-    fail_next_memory_realloc = false;
+static bool fail_next_memory_operation = false;
+extern void *__real_mremap(void *address, u64 prev, u64 new, s32, ...);
+extern void *__wrap_mremap(void *address, u64 prev, u64 new, s32 flags, ...) {
+  if (fail_next_memory_operation) {
+    fail_next_memory_operation = false;
     return NULL;
   }
-  return __real_memory_realloc(address, prev, new);
+  return __real_mremap(address, prev, new, flags);
 }
 
-int main(void) {
+extern void *__real_mmap(void *address, u64 new, s32 prot, s32 flags, s32 fd,
+                         s64 offset);
+extern void *__wrap_mmap(void *address, u64 new, s32 prot, s32 flags, s32 fd,
+                         s64 offset) {
+  if (fail_next_memory_operation) {
+    fail_next_memory_operation = false;
+    return NULL;
+  }
+  return __real_mmap(address, new, prot, flags, fd, offset);
+}
+
+s32 main(void) {
   CHECK_START();
 
   {
     u8 *mem = NULL;
-    fail_next_memory_realloc = true;
+    fail_next_memory_operation = true;
     CHECK(array_stack_push_back(mem, 1), ==, false);
     CHECK(mem, ==, NULL);
     CHECK(array_stack_push_back(mem, 1), ==, true);
     CHECK(mem, !=, NULL);
     array_stack_free(mem);
+    CHECK(mem, ==, NULL);
   }
 
   {
@@ -99,7 +107,7 @@ int main(void) {
     u16 *mem = NULL;
     while (array_stack_push_back(mem, 1)) {
       CHECK(mem, !=, NULL);
-      fail_next_memory_realloc = true;
+      fail_next_memory_operation = true;
     }
     CHECK(mem, !=, NULL);
     CHECK(array_stack_header(mem)->end, ==, 32);

@@ -1,13 +1,9 @@
 cinclude = -I../include
-cwarn = -Weverything -Werror -Wno-gnu-binary-literal -Wno-language-extension-token $
-        -Wno-reserved-identifier -Wno-unused-macros -Wno-newline-eof $
-        -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function $
-        -Wno-declaration-after-statement -Wno-gnu-auto-type -Wno-c++98-compat $
-        -Wno-gnu-statement-expression-from-macro-expansion -Wno-flexible-array-extensions $
-        -Wno-gnu-designator -Wno-gnu-case-range -Wno-fixed-enum-extension -Wno-gnu-designator $
-        -Wno-c99-compat -Wno-unused-label -Wno-null-character 
+cwarn = -pedantic -Werror -Wextra -Wfloat-conversion -Wimplicit-fallthrough $
+        -Wno-gnu-case-range -Wno-fixed-enum-extension -Wno-gnu-zero-variadic-macro-arguments
 
-cflags = -std=c2x -g -O0 $cwarn $cinclude  -fprofile-instr-generate -fcoverage-mapping 
+cprofile = -fprofile-instr-generate -fcoverage-mapping 
+cflags = -std=c2x -g -O0 $cwarn $cinclude  
 
 rule obj
   depfile = $out.d
@@ -17,7 +13,7 @@ rule obj
 rule exe
   depfile = $out.d
   deps = gcc
-  command = clang $cflags -L lib -MD -MF $out.d $in $extra -o $out $libs
+  command = clang $cflags -L lib -include-pch $pch -MD -MF $out.d $in $extra -o $out $libs
 
 rule pch
   depfile = $out.d
@@ -27,31 +23,34 @@ rule pch
 rule link
   command = clang -o $out $in $libs
 
-rule ar
-  command = llvm-ar rc $out $in
-
 rule run
   command = LLVM_PROFILE_FILE="$in.profraw" $in
 
 rule glslc
   command = glslc -mfmt=c $in -o $out
 
-build include/os.h.pch: pch ../include/os.h
-build include/check.h.pch: pch ../include/check.h
-build include/array_stack.h.pch: pch ../include/array_stack.h
-
-build obj/os_linux.o: obj ../src/os_linux.c
-build lib/libds.a: ar $
-  obj/os_linux.o $
+build include/aion.h.pch: pch ../include/aion.h
+  define = -DAION_IMPLEMENTATION -DAION_IMPLEMENTATION_LINUX -D_GNU_SOURCE
   
-build tests/os: exe ../tests/os.c | lib/libds.a
-  libs = -lds
-build tests_os: run tests/os
+build tests/os_test: exe ../tests/os_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build os_test: run tests/os_test
 
-build tests/array_stack: exe ../tests/array_stack.c | lib/libds.a
-  extra = "-Wl,--wrap=memory_realloc" 
-  libs = -lds
+build tests/array_stack_test: exe ../tests/array_stack_test.c | include/aion.h.pch
+  extra = -Wl,--wrap=mremap -Wl,--wrap=mmap
+  pch = include/aion.h.pch
+build array_stack_test: run tests/array_stack_test
 
-build tests_array_stack: run tests/array_stack
-# build tests_array_stack: run LLVM_PROFILE_FILE="tests/array_stack.profraw" tests/array_stack
+build tests/pool_test: exe ../tests/pool_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build pool_test: run tests/pool_test
 
+build tests/hash_test: exe ../tests/hash_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build hash_test: run tests/hash_test
+
+build tests/strings_test: exe ../tests/strings_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build strings_test: run tests/strings_test
+ 
+ 

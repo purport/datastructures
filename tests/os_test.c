@@ -1,7 +1,6 @@
-#include <check.h>
-#include <os.h>
+#include <aion.h>
 
-int main(void) {
+s32 main(void) {
   u8 *mem;
   CHECK_START();
   // null allocation
