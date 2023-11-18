@@ -15,6 +15,8 @@ typedef long int s64;
 typedef float f32;
 typedef double f64;
 
+#define U32_MAX 0xffffffff
+
 _Static_assert(sizeof(c8) == 1, "incorrect integer width");
 _Static_assert(sizeof(u8) == 1, "incorrect integer width");
 _Static_assert(sizeof(s8) == 1, "incorrect integer width");
@@ -489,4 +491,139 @@ struct string *strings_intern(struct strings *strings, u32 hash, u64 count,
   }
 }
 
+#endif
+
+// B-Tree
+
+enum {
+  BTREE_MIN = 4,
+  BTREE_MAX = 8,
+};
+
+struct btree {
+  u32 height;
+
+  struct btree_node {
+    u32 length;
+    u32 key[BTREE_MAX];
+    union {
+      void *value[BTREE_MAX];
+      struct btree_node *children[BTREE_MAX];
+    };
+  } root;
+};
+
+extern void btree_insert(struct btree *tree, u64 key, void *value);
+
+#ifdef AION_IMPLEMENTATION
+
+static struct btree_node *btree_insert_leaf(struct btree_node *node, u32 key,
+                                            void *value) {
+  u32 index;
+  for (index = 0; index != node->length; ++index) {
+    if (key <= node->key[index]) {
+      if (key == node->key[index]) {
+        // replace value
+        node->value[index] = value;
+        return NULL;
+      }
+      break;
+    }
+  }
+
+  struct btree_node *right = NULL;
+  if (node->length == BTREE_MAX) {
+    right = memory_realloc(NULL, 0, sizeof(*right));
+    for (u32 i = BTREE_MIN, j = 0; j != BTREE_MIN; ++i, ++j) {
+      right->key[j] = node->key[i];
+      right->value[j] = node->value[i];
+    }
+    right->length = BTREE_MIN;
+    node->length = BTREE_MIN;
+    if (index >= BTREE_MIN) {
+      node = right;
+      index -= BTREE_MIN;
+    }
+  }
+
+  node->length++;
+  for (u32 i = index; i != node->length; ++i) {
+    SWAP(node->key[i], key);
+    SWAP(node->value[i], value);
+  }
+
+  return right;
+}
+
+static struct btree_node *btree_insert_node(struct btree_node *node, u32 height,
+                                            u32 key, void *value) {
+  u32 index;
+  for (index = 0; index != node->length; ++index) {
+    if (key <= node->key[index]) {
+      break;
+    }
+  }
+  // increment end key
+  if (index == node->length) {
+    node->key[--index] = key;
+  }
+
+  struct btree_node *new_child;
+  if (height == 1) {
+    // child will be a leaf
+    new_child = btree_insert_leaf(node->children[index], key, value);
+  } else {
+    new_child =
+        btree_insert_node(node->children[index], height - 1, key, value);
+  }
+
+  struct btree_node *sibling = NULL;
+  if (new_child) {
+    if (node->length == BTREE_MAX) {
+      sibling = memory_realloc(NULL, 0, sizeof(*sibling));
+      for (u32 i = BTREE_MIN, j = 0; j != BTREE_MIN; ++i, ++j) {
+        sibling->key[j] = node->key[i];
+        sibling->value[j] = node->value[i];
+      }
+      sibling->length = BTREE_MIN;
+      node->length = BTREE_MIN;
+      if (index >= BTREE_MIN) {
+        node = sibling;
+        index -= BTREE_MIN;
+      }
+    }
+    node->key[index] =
+        node->children[index]->key[node->children[index]->length - 1];
+
+    u32 new_key = new_child->key[new_child->length - 1];
+
+    node->length++;
+    for (u32 i = index + 1; i != node->length; ++i) {
+      SWAP(node->key[i], new_key);
+      SWAP(node->children[i], new_child);
+    }
+  }
+
+  return sibling;
+}
+
+void btree_insert(struct btree *tree, u64 key, void *value) {
+  struct btree_node *new = NULL;
+  if (tree->height == 0) {
+    new = btree_insert_leaf(&tree->root, key, value);
+  } else {
+    new = btree_insert_node(&tree->root, tree->height, key, value);
+  }
+
+  if (new) {
+    struct btree_node *root_copy = memory_realloc(NULL, 0, sizeof(*root_copy));
+    *root_copy = tree->root;
+    tree->root.length = 2;
+    tree->root.key[0] = root_copy->key[root_copy->length - 1];
+    tree->root.children[0] = root_copy;
+    tree->root.key[1] = new->key[new->length - 1];
+    tree->root.children[1] = new;
+    tree->height++;
+  }
+}
 #endif

@@ -57,4 +57,12 @@ build tests/strings_test: exe ../tests/strings_test.c | include/aion.h.pch
   pch = include/aion.h.pch
 build strings_test: run tests/strings_test
  
+build tests/btree_test: exe ../tests/btree_test.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build btree_test: run tests/btree_test
+ 
+build tests/btree_bench: exe ../tests/btree_bench.c | include/aion.h.pch
+  pch = include/aion.h.pch
+build btree_bench: run tests/btree_bench
+ 
  
