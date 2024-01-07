@@ -1,5 +1,7 @@
 #include <aion.h>
+#include <pthread.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 extern s32 main(void);
 
@@ -166,43 +168,26 @@ struct station {
   u64 count;
 };
 
-void process(c8 *begin, c8 *end, struct station *s) {
+struct chunk_data {
+  c8 *begin, *end;
+  struct station s[413];
+};
+
+void *process(void *vd) {
+  struct chunk_data *c = vd;
+  c8 *begin = c->begin;
+  c8 *end = c->end;
+  struct station *s = c->s;
   c8 ch;
   do {
     c8 *line_begin = begin;
-    s64 h = 0x811C9DC5;
+    s64 d = 0x811C9DC5;
     while ((ch = *begin++) != ';') {
       s64 pp = ch & 0xff;
-      h = h ^ pp * 16777619 & 0xffffffff;
+      d = d ^ pp * 16777619 & 0xffffffff;
     }
     c8 *line_end = begin - 1;
-
-    // if (strncmp(line_begin, "Busan", strlen("Busan")) == 0) {
-    //   {
-    //     printf("\n");
-    //     printf("\n");
-    //     c8 *begin2 = line_begin;
-    //     s64 h = 0x811C9DC5;
-    //     while ((ch = *begin2++) != ';') {
-    //       s64 pp = ch & 0xff;
-    //       h = h ^ pp * 16777619;
-    //       printf("%08lx %ld \n", h, pp);
-    //     }
-    //     printf("\n");
-    //     s64 d = G[h % COUNT(G)];
-    //     for (c8 *it = line_begin; it != line_end; ++it) {
-    //       s64 pp = *it & 0xff;
-    //       d = d ^ pp * 16777619 & 0xffffffff;
-    //       printf("%08lx %ld \n", d, pp);
-    //     }
-    //     printf("\n");
-    //     d = d % COUNT(V);
-    //     printf("Index %d\n", V[d]);
-    //     printf("\n");
-    //   }
-    // }
-
-    s64 d = G[h % COUNT(G)];
+    d = G[d % COUNT(G)];
     s32 index;
     if (d == 0) {
       index = 245;
@@ -219,35 +204,35 @@ void process(c8 *begin, c8 *end, struct station *s) {
       index = V[d] - 1;
     }
 
-    ASSERT(0 <= index && index < 414);
+    // ASSERT(0 <= index && index < 413);
 
     f32 n;
     ch = *begin++;
     f32 sign = 1;
     if (ch == '-') {
       ch = *begin++;
-      ASSERT('0' <= ch && ch <= '9');
+      // ASSERT('0' <= ch && ch <= '9');
       sign = -1;
       n = ch - '0';
     } else {
-      ASSERT('0' <= ch && ch <= '9');
+      // ASSERT('0' <= ch && ch <= '9');
       n = ch - '0';
     }
     while ((ch = *begin++) != '.') {
-      ASSERT('0' <= ch && ch <= '9');
+      // ASSERT('0' <= ch && ch <= '9');
       n = n * 10 + (ch - '0');
     }
     ch = *begin++;
-    ASSERT('0' <= ch && ch <= '9');
+    // ASSERT('0' <= ch && ch <= '9');
     n += (ch - '0') / 10.0f;
-    ch = *begin++;
-    ASSERT(ch == '\n');
-
-    if (s[index].count == 0) {
-      printf("%s, %.*s, %d\n", keys[index], (s32)(line_end - line_begin),
-             line_begin, index);
-    }
     n *= sign;
+    ch = *begin++;
+    // ASSERT(ch == '\n');
+
+    // if (s[index].count == 0) {
+    //   printf("%s, %.*s, %d\n", keys[index], (s32)(line_end - line_begin),
+    //          line_begin, index);
+    // }
     s[index].sum += n;
     s[index].count += 1;
     if (s[index].max < n) {
@@ -258,35 +243,31 @@ void process(c8 *begin, c8 *end, struct station *s) {
     }
 
   } while (begin != end);
+
+  return NULL;
 }
 
 s32 main(void) {
-  {
-    u32 i = 81;
-    c8 *key = keys[i];
-    s32 index;
-    log = true;
-    s64 h = hash(0, key);
-    log = false;
-    s32 d = G[h % COUNT(G)];
-    if (d == 0) {
-      d = h % COUNT(V);
-    } else if (d < 0) {
-      d = -d - 1;
-    } else {
-      d = hash(d, key) % COUNT(V);
-    }
-    index = V[d] - 1;
-    printf("%s = %d\n", keys[i], i);
-    // return 0;
-  }
+  // {
+  //   u32 i = 81;
+  //   c8 *key = keys[i];
+  //   s32 index;
+  //   log = true;
+  //   s64 h = hash(0, key);
+  //   log = false;
+  //   s32 d = G[h % COUNT(G)];
+  //   if (d == 0) {
+  //     d = h % COUNT(V);
+  //   } else if (d < 0) {
+  //     d = -d - 1;
+  //   } else {
+  //     d = hash(d, key) % COUNT(V);
+  //   }
+  //   index = V[d] - 1;
+  //   printf("%s = %d\n", keys[i], i);
+  //   return 0;
+  // }
 
-  struct station s[414];
-  memset(s, 0, sizeof(s));
-  for (u32 i = 0; i != COUNT(s); ++i) {
-    s[i].min = 500.0f;
-    s[i].max = -500.0f;
-  }
   u64 size = 0;
   c8 *chunk_begin;
   c8 *begin = chunk_begin =
@@ -296,8 +277,13 @@ s32 main(void) {
     return 1;
   }
 
-  u64 chunk_size = size / 8;
-  printf("File size is %lu, processing in chunks of %lu\n", size, chunk_size);
+  u32 chunk_index = 0;
+  struct chunk_data chunks[8];
+  pthread_t threads[8];
+  u64 chunk_size = size / COUNT(chunks);
+  // printf("File size is %lu, processing in chunks of %lu\n", size,
+  // chunk_size);
+
   c8 *end = &begin[size];
   while (chunk_begin != end) {
     c8 *chunk_end = &chunk_begin[chunk_size];
@@ -308,20 +294,51 @@ s32 main(void) {
         --chunk_end;
       }
     }
-    printf("Chunk %08lx to %08lx\n", chunk_begin - begin, chunk_end - begin);
-    process(chunk_begin, chunk_end, s);
-    chunk_begin = chunk_end;
-  }
 
-  u64 count = 0;
-  for (u32 i = 0; i != COUNT(s); ++i) {
-    struct station st = s[i];
-    count += st.count;
-    if (st.count == 0) {
-      continue;
+    // printf("Chunk(%d) %08lx to %08lx\n", chunk_index, chunk_begin - begin,
+    //        chunk_end - begin);
+
+    chunks[chunk_index].begin = chunk_begin;
+    chunks[chunk_index].end = chunk_end;
+    for (u32 i = 0; i != 413; ++i) {
+      chunks[chunk_index].s[i].count = 0;
+      chunks[chunk_index].s[i].sum = 0;
+      chunks[chunk_index].s[i].min = 500.0f;
+      chunks[chunk_index].s[i].max = -500.0f;
     }
-    printf("%s=%.1f/%.1f/%.1f, ", keys[i], st.min, st.sum / st.count, st.max);
+
+    s32 ret = pthread_create(&threads[chunk_index], NULL, process,
+                             &chunks[chunk_index]);
+    if (ret != 0) {
+      printf("Error creating thread %d: %d\n", chunk_index, ret);
+    }
+    // process(&chunks[chunk_index]);
+    chunk_begin = chunk_end;
+    ++chunk_index;
   }
 
-  printf("\n\n%lu lines in file\n", count);
+  for (u32 c = 0; c != COUNT(chunks); ++c) {
+    pthread_join(threads[c], NULL);
+  }
+  u64 total_count = 0;
+  for (u32 i = 0; i != 413; ++i) {
+    u64 count = 0;
+    f32 sum = 0;
+    f32 min = 500.0f;
+    f32 max = -500.0f;
+    for (u32 c = 0; c != COUNT(chunks); ++c) {
+      count += chunks[c].s[i].count;
+      sum += chunks[c].s[i].sum;
+      if (min > chunks[c].s[i].min) {
+        min = chunks[c].s[i].min;
+      }
+      if (max < chunks[c].s[i].max) {
+        max = chunks[c].s[i].max;
+      }
+    }
+    total_count += count;
+    printf("%s=%.1f/%.1f/%.1f, ", keys[i], min, sum / count, max);
+  }
+
+  // printf("\n\n%lu lines in file\n", total_count);
 }
