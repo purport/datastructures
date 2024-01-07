@@ -61,6 +61,7 @@ static void __debugbreak(void) { __asm__("int $3"); }
 
 #define PAGESIZE               4 * KILOBYTE
 #define OFFSETBY(a, b)         ((void *)(((u64)(void *)(a)) + (b)))
+#define ADDROF(a)              (((u64)(void *)(a)))
 #define OFFSETOF(st, m)        __builtin_offsetof(st, m)
 #define COUNT(a)               (sizeof((a)) / sizeof((a)[0]))
 #define ALIGNOF(a)             _Alignof(a)
@@ -75,9 +76,12 @@ static void __debugbreak(void) { __asm__("int $3"); }
 
 extern void *memory_realloc(void *address, u64 prev, u64 new);
 extern u128 now();
+extern void *file_map(c8 *path, u64 *size);
 
 #ifdef AION_IMPLEMENTATION_LINUX
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <time.h>
 
 u128 now() {
@@ -96,6 +100,20 @@ void *memory_realloc(void *address, u64 prev, u64 new) {
                 -1, 0);
   }
   return mremap(address, prev, new, MREMAP_MAYMOVE);
+}
+
+void *file_map(c8 *path, u64 *size) {
+  s32 fd = open(path, O_RDONLY);
+  struct stat s;
+  fstat(fd, &s);
+  void *result = mmap(NULL, s.st_size, PROT_WRITE, MAP_PRIVATE, fd, 0);
+  if (result == MAP_FAILED) {
+    return NULL;
+  }
+  if (size != NULL) {
+    *size = s.st_size;
+  }
+  return result;
 }
 
 #endif
