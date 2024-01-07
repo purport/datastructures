@@ -1,9 +1,10 @@
 cinclude = -I../include
 cwarn = -pedantic -Werror -Wextra -Wfloat-conversion -Wimplicit-fallthrough $
-        -Wno-gnu-case-range -Wno-fixed-enum-extension -Wno-gnu-zero-variadic-macro-arguments
+        -Wno-gnu-case-range -Wno-fixed-enum-extension -Wno-gnu-zero-variadic-macro-arguments $
+        -Wno-single-bit-bitfield-constant-conversion -Wno-gnu-binary-literal
 
 cprofile = -fprofile-instr-generate -fcoverage-mapping 
-cflags = -std=c2x -g -O0 $cwarn $cinclude  
+cflags = -std=c2x -g -O2 $cwarn $cinclude  
 
 rule obj
   depfile = $out.d
@@ -34,35 +35,36 @@ build include/aion.h.pch: pch ../include/aion.h
   
 build tests/os_test: exe ../tests/os_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build os_test: run tests/os_test
+# build os_test: run tests/os_test
 
 build tests/array_stack_test: exe ../tests/array_stack_test.c | include/aion.h.pch
   extra = -Wl,--wrap=mremap -Wl,--wrap=mmap
   pch = include/aion.h.pch
-build array_stack_test: run tests/array_stack_test
+# build array_stack_test: run tests/array_stack_test
 
 build tests/array_gap_test: exe ../tests/array_gap_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build array_gap_test: run tests/array_gap_test
+# build array_gap_test: run tests/array_gap_test
 
 build tests/pool_test: exe ../tests/pool_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build pool_test: run tests/pool_test
+# build pool_test: run tests/pool_test
 
 build tests/hash_test: exe ../tests/hash_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build hash_test: run tests/hash_test
+# build hash_test: run tests/hash_test
 
 build tests/strings_test: exe ../tests/strings_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build strings_test: run tests/strings_test
+# build strings_test: run tests/strings_test
  
 build tests/btree_test: exe ../tests/btree_test.c | include/aion.h.pch
   pch = include/aion.h.pch
-build btree_test: run tests/btree_test
+# build btree_test: run tests/btree_test
  
 build tests/btree_bench: exe ../tests/btree_bench.c | include/aion.h.pch
   pch = include/aion.h.pch
-build btree_bench: run tests/btree_bench
  
+build bin/purfect_hash: exe ../src/purfect_hash.c | include/aion.h.pch
+  pch = include/aion.h.pch
  

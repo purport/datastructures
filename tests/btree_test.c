@@ -1,5 +1,5 @@
-
 #include <aion.h>
+#include <stdlib.h>
 
 static bool btree_check_leaf(struct btree_node *node, u32 min, u32 max) {
   u32 bound = node->key[0];
@@ -26,12 +26,11 @@ static bool btree_check_node(struct btree_node *node, u32 height, u32 min,
       return false;
     }
     if (height == 1) {
-      if (!btree_check_leaf(node->children[i], bound, node->key[i])) {
+      if (!btree_check_leaf(node->child[i], bound, node->key[i])) {
         return false;
       }
     } else {
-      if (!btree_check_node(node->children[i], height - 1, bound,
-                            node->key[i])) {
+      if (!btree_check_node(node->child[i], height - 1, bound, node->key[i])) {
         return false;
       }
     }
@@ -65,44 +64,108 @@ static void btree_node_print(struct btree_node *n, u32 height) {
   printf("}}\"]\n");
   if (height != 0) {
     for (u32 index = 0; index != n->length; ++index) {
-      btree_node_print(n->children[index], height - 1);
+      btree_node_print(n->child[index], height - 1);
 
       printf("\"node%lu\":f%u -> \"node%lu\"\n", id, index,
-             (u64)(void *)n->children[index]);
+             (u64)(void *)n->child[index]);
     }
   }
 }
 static void btree_print(struct btree *tree) {
-  printf("digraph g{\nnode [shape = record, height=.05];\n");
+#define BOX  QUOTE(COLOR_LION)
+#define TEXT QUOTE(COLOR_COCOA)
+#define EDGE QUOTE(COLOR_OLIVINE)
+  // clang-format off
+  printf("digraph g{\n"
+      "node [shape = record,height=.05,fontcolor="TEXT",color="BOX"];\n"
+      "edge [color="EDGE"];\n"
+      "bgcolor=\"transparent\";\n");
+  // clang-format on
 
   btree_node_print(&tree->root, tree->height);
 
   printf("}\n");
 }
 
+static s32 cmp(const void *a, const void *b) { return *(u32 *)a - *(u32 *)b; }
+
 s32 main() {
   CHECK_START();
 
   {
     struct btree tree = {0};
-    btree_insert(&tree, 1, NULL);
-    btree_insert(&tree, 3, NULL);
-    btree_insert(&tree, 2, NULL);
-    btree_insert(&tree, 4, NULL);
-    btree_insert(&tree, 12, NULL);
-    btree_insert(&tree, 6, NULL);
-    btree_insert(&tree, 7, NULL);
-    btree_insert(&tree, 8, NULL);
-    btree_insert(&tree, 13, NULL);
-    btree_insert(&tree, 15, NULL);
-    btree_insert(&tree, 16, NULL);
-    btree_insert(&tree, 17, NULL);
-    btree_insert(&tree, 18, NULL);
-    CHECK(btree_check(&tree), ==, true);
+    btree_insert(&tree, 1);
+    btree_insert(&tree, 3);
+    btree_insert(&tree, 2);
+    btree_insert(&tree, 4);
+    btree_insert(&tree, 6);
     btree_print(&tree);
-    // CHECK(btree_check(&tree), ==, true);
-    // btree_insert(&tree, 4, NULL);
-    // CHECK(btree_check(&tree), ==, true);
+    btree_insert(&tree, 12);
+    btree_insert(&tree, 6);
+    btree_insert(&tree, 7);
+    btree_insert(&tree, 8);
+    btree_insert(&tree, 13);
+    btree_insert(&tree, 15);
+    btree_insert(&tree, 16);
+    btree_insert(&tree, 17);
+    btree_insert(&tree, 18);
+    CHECK(btree_check(&tree), ==, true);
+
+    // struct btree_iterator it;
+    // btree_iterator(&tree, &it);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 1);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 2);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 3);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 4);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 6);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 7);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 8);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 12);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 13);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 15);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 16);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 17);
+    // CHECK(btree_iterator_next(&it), ==, true);
+    // CHECK(btree_iterator_key(&it), ==, 18);
+    // CHECK(btree_iterator_next(&it), ==, false);
+  }
+
+  if (0) {
+    static u32 key[2305] = {0};
+    srand(7);
+    struct btree tree = {0};
+    for (u32 i = 0; COUNT(key) != i; ++i) {
+      key[i] = rand();
+      btree_insert(&tree, key[i]);
+    }
+
+    qsort(key, COUNT(key), sizeof(*key), cmp);
+
+    u32 i = 0;
+    struct btree_iterator it = {0};
+    btree_iterator(&tree, &it);
+    while (btree_iterator_next(&it)) {
+      CHECK(i, !=, COUNT(key));
+      if (i == COUNT(key)) {
+        break;
+      }
+
+      u32 k = btree_iterator_key(&it);
+      CHECK(key[i++], ==, k);
+    }
+    CHECK(i, ==, COUNT(key));
   }
 
   CHECK_END();

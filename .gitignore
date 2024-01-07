@@ -58,3 +58,6 @@ compile_commands.json
 .corpus/
 tmp/
 
+measurements.txt
+words
+mphf.py
