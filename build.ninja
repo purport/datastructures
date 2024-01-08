@@ -4,7 +4,7 @@ cwarn = -pedantic -Werror -Wextra -Wfloat-conversion -Wimplicit-fallthrough $
         -Wno-single-bit-bitfield-constant-conversion -Wno-gnu-binary-literal
 
 cprofile = -fprofile-instr-generate -fcoverage-mapping 
-cflags = -std=c2x -g -O2 $cwarn $cinclude  
+cflags = -std=c2x -g -O2 -mssse3 $cwarn $cinclude  
 
 rule obj
   depfile = $out.d

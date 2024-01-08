@@ -1,7 +1,9 @@
 #include <aion.h>
+#include <bits/floatn-common.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <xmmintrin.h>
 
 extern s32 main(void);
 
@@ -164,7 +166,8 @@ static s64 hash(s64 d, c8 *chars) {
 }
 
 struct station {
-  f32 min, max, sum;
+  s16 min, max;
+  s32 sum;
   u64 count;
 };
 
@@ -180,54 +183,131 @@ void *process(void *vd) {
   struct station *s = c->s;
   c8 ch;
   do {
-    c8 *line_begin = begin;
-    s64 d = 0x811C9DC5;
-    while ((ch = *begin++) != ';') {
-      s64 pp = ch & 0xff;
-      d = d ^ pp * 16777619 & 0xffffffff;
-    }
-    c8 *line_end = begin - 1;
-    d = G[d % COUNT(G)];
-    s32 index;
-    if (d == 0) {
-      index = 245;
-    } else {
-      if (d < 0) {
-        d = -d - 1;
-      } else {
-        for (c8 *it = line_begin; it != line_end; ++it) {
-          s64 pp = *it & 0xff;
-          d = d ^ pp * 16777619 & 0xffffffff;
-        }
-        d = d % COUNT(V);
+    s32 index = 0;
+    // {
+    //   while ((ch = *begin++) != ';')
+    //     ;
+    // }
+    {
+      c8 *line_begin = begin;
+      s64 d = 0x811C9DC5;
+      // ASSERT(begin < end);
+      while ((ch = *begin++) != ';') {
+        s64 pp = ch & 0xff;
+        d = d ^ pp * 16777619 & 0xffffffff;
       }
-      index = V[d] - 1;
+      c8 *line_end = begin - 1;
+      d = G[d % COUNT(G)];
+      if (d == 0) {
+        index = 245;
+      } else {
+        if (d < 0) {
+          d = -d - 1;
+        } else {
+          for (c8 *it = line_begin; it != line_end; ++it) {
+            s64 pp = *it & 0xff;
+            d = d ^ pp * 16777619 & 0xffffffff;
+          }
+          d = d % COUNT(V);
+        }
+        index = V[d] - 1;
+      }
     }
-
     // ASSERT(0 <= index && index < 413);
 
-    f32 n;
-    ch = *begin++;
-    f32 sign = 1;
-    if (ch == '-') {
-      ch = *begin++;
-      // ASSERT('0' <= ch && ch <= '9');
-      sign = -1;
-      n = ch - '0';
-    } else {
-      // ASSERT('0' <= ch && ch <= '9');
-      n = ch - '0';
+    s32 n;
+    {
+      static __m64 shuffles[] = {
+          [4] = 0xffffffff0200ffff,
+          [3] = 0xffffffff030100ff,
+          [2] = 0xffffffff04020100,
+      };
+      s32 sign = 1;
+      if (*begin == '-') {
+        sign = -1;
+        ++begin;
+      }
+      __m64 block = ((__m64 *)begin)[0];
+      __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a0a);
+      u8 z = __builtin_clzll(c) >> 3;
+      u32 s =
+          (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll, shuffles[z]);
+      s32 a = ((s * 10) + (s >> 8));
+      s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
+      n = sign * b;
+      begin += 8 - z;
+      ch = begin[-1];
     }
-    while ((ch = *begin++) != '.') {
-      // ASSERT('0' <= ch && ch <= '9');
-      n = n * 10 + (ch - '0');
-    }
-    ch = *begin++;
-    // ASSERT('0' <= ch && ch <= '9');
-    n += (ch - '0') / 10.0f;
-    n *= sign;
-    ch = *begin++;
-    // ASSERT(ch == '\n');
+
+    // {
+    //   static __m64 shuffles[] = {
+    //       [3] = 0xffffffff0705ffff,
+    //       [4] = 0xffffffff070504ff,
+    //       [5] = 0xffffffff07050403,
+    //   };
+    //   s32 sign = 1;
+    //   if (*begin == '-') {
+    //     sign = -1;
+    //     ++begin;
+    //   }
+    //   c8 *start = begin;
+    //   while (*++begin != '\n')
+    //     ;
+    //   __m64 block = ((__m64 *)begin)[-1];
+    //   u32 s = (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+    //                                      shuffles[begin - start]);
+    //   u32 a = ((s * 10) + (s >> 8));
+    //   u32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
+    //   n = sign * b;
+    //   ch = *begin++;
+    // }
+    // {
+    //   ch = *begin++;
+    //   f32 sign = 1;
+    //   if (ch == '-') {
+    //     sign = -1;
+    //     ch = *begin++;
+    //   }
+    //   n = ch - '0';
+    //   ch = *begin++;
+    //   if (ch != '.') {
+    //     n = n * 10 + (ch - '0');
+    //     ch = *begin++;
+    //     if (ch != '.') {
+    //       n = n * 10 + (ch - '0');
+    //       ch = *begin++;
+    //     }
+    //   }
+
+    //   ch = *begin++;
+    //   n += (ch - '0') / 10.0f;
+    //   n *= sign;
+    //   ch = *begin++;
+    // }
+
+    // {
+    //   ch = *begin++;
+    //   f32 sign = 1;
+    //   if (ch == '-') {
+    //     ch = *begin++;
+    //     // ASSERT('0' <= ch && ch <= '9');
+    //     sign = -1;
+    //     n = ch - '0';
+    //   } else {
+    //     // ASSERT('0' <= ch && ch <= '9');
+    //     n = ch - '0';
+    //   }
+    //   while ((ch = *begin++) != '.') {
+    //     // ASSERT('0' <= ch && ch <= '9');
+    //     n = n * 10 + (ch - '0');
+    //   }
+    //   ch = *begin++;
+    //   // ASSERT('0' <= ch && ch <= '9');
+    //   n += (ch - '0') / 10.0f;
+    //   n *= sign;
+    //   ch = *begin++;
+    // }
+    ASSERT(ch == '\n');
 
     // if (s[index].count == 0) {
     //   printf("%s, %.*s, %d\n", keys[index], (s32)(line_end - line_begin),
@@ -248,6 +328,75 @@ void *process(void *vd) {
 }
 
 s32 main(void) {
+  // {
+  //   static __m64 shuffles[] = {
+  //       [4] = 0xffffffff0200ffff,
+  //       [3] = 0xffffffff030100ff,
+  //       [2] = 0xffffffff04020100,
+  //   };
+  //   //              |765432 10|
+  //   c8 *buffer = "ab;3.5\nlkjsdflkj;";
+  //   c8 *begin = buffer;
+  //   while (*begin++ != ';')
+  //     ;
+  //   printf("%c\n", *begin);
+  //   __m64 block = ((__m64 *)begin)[0];
+  //   __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a0a);
+  //   printf("%016lx\n", (u64)block);
+  //   printf("%016lx\n", (u64)c);
+  //   u8 z = __builtin_clzll(c) >> 3;
+  //   printf("%d\n", z);
+
+  //   u32 s =
+  //       (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+  //       shuffles[z]);
+  //   printf("%08x\n", s);
+  //   s32 a = ((s * 10) + (s >> 8));
+  //   s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
+  //   // printf("%08x\n", (u32)((u64)s));
+  //   printf("%08x\n", a);
+  //   printf("%08x\n", b);
+  //   printf("%d\n", b);
+  //   printf("next char %2s\n", begin + 8 - z);
+  //   return 0;
+  // }
+  // {
+  //   // static __m64 shuffles[] = {
+  //   //     [3] = 0xffffffffffff0705,
+  //   //     [4] = 0xffffffffff070504,
+  //   //     [5] = 0xffffffff07050403,
+  //   // };
+  //   // const u32 mask = 0x000000FF;
+  //   // const u32 mul1 = 0x000F42400;
+  //   // const u32 mul2 = 0x0000271;
+  //   // c8 *buffer = "_____2.1";
+  //   // c8 *buffer = "    32.1";
+  //   c8 *buffer = "ab;-912.1\n";
+  //   c8 *begin = buffer;
+  //   while (*begin++ != ';')
+  //     ;
+  //   printf("%c\n", *begin);
+
+  //   if (*begin == '-') {
+  //     ++begin;
+  //   }
+  //   c8 *end = begin;
+  //   while (*++end != '\n')
+  //     ;
+  //   printf("len = %ld\n", end - begin);
+  //   __m64 block = ((__m64 *)end)[-1];
+  //   u32 s = (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+  //                                      shuffles[end - begin]);
+  //   printf("%08x\n", s);
+  //   s32 a = ((s * 10) + (s >> 8));
+  //   s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
+  //   // printf("%08x\n", (u32)((u64)s));
+  //   printf("%08x\n", a);
+  //   printf("%08x\n", b);
+  //   printf("%d\n", b);
+  //   return 0;
+  // }
+
   // {
   //   u32 i = 81;
   //   c8 *key = keys[i];
@@ -303,8 +452,8 @@ s32 main(void) {
     for (u32 i = 0; i != 413; ++i) {
       chunks[chunk_index].s[i].count = 0;
       chunks[chunk_index].s[i].sum = 0;
-      chunks[chunk_index].s[i].min = 500.0f;
-      chunks[chunk_index].s[i].max = -500.0f;
+      chunks[chunk_index].s[i].min = 5000;
+      chunks[chunk_index].s[i].max = -5000;
     }
 
     s32 ret = pthread_create(&threads[chunk_index], NULL, process,
@@ -323,9 +472,9 @@ s32 main(void) {
   u64 total_count = 0;
   for (u32 i = 0; i != 413; ++i) {
     u64 count = 0;
-    f32 sum = 0;
-    f32 min = 500.0f;
-    f32 max = -500.0f;
+    s32 sum = 0;
+    s32 min = 5000;
+    s32 max = -5000;
     for (u32 c = 0; c != COUNT(chunks); ++c) {
       count += chunks[c].s[i].count;
       sum += chunks[c].s[i].sum;
@@ -337,7 +486,8 @@ s32 main(void) {
       }
     }
     total_count += count;
-    printf("%s=%.1f/%.1f/%.1f, ", keys[i], min, sum / count, max);
+    printf("%s=%.1f/%.1f/%.1f, ", keys[i], min / 10.0f, sum / (10.0f * count),
+           max / 10.0f);
   }
 
   // printf("\n\n%lu lines in file\n", total_count);
