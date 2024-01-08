@@ -217,7 +217,7 @@ void *process(void *vd) {
 
     s32 n;
     {
-      static __m64 shuffles[] = {
+      __m64 shuffles[] = {
           [4] = 0xffffffff0200ffff,
           [3] = 0xffffffff030100ff,
           [2] = 0xffffffff04020100,
