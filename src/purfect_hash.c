@@ -333,14 +333,18 @@ void *process(void *vd) {
     //   printf("%s, %.*s, %d\n", keys[index], (s32)(line_end - line_begin),
     //          line_begin, index);
     // }
+#define MIN(a, b) b + ((a - b) & (a - b) >> 31)
+#define MAX(a, b) a - ((a - b) & (a - b) >> 31)
     s[index].sum += n;
     s[index].count += 1;
-    if (s[index].max < n) {
-      s[index].max = n;
-    }
-    if (s[index].min > n) {
-      s[index].min = n;
-    }
+    s[index].max = MAX(s[index].max, n);
+    s[index].min = MIN(s[index].min, n);
+    // if (s[index].max < n) {
+    //   s[index].max = n;
+    // }
+    // if (s[index].min > n) {
+    //   s[index].min = n;
+    // }
 
   } while (begin != end);
 
