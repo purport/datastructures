@@ -216,28 +216,48 @@ void *process(void *vd) {
     // ASSERT(0 <= index && index < 413);
 
     s32 n;
+
     {
-      __m64 shuffles[] = {
-          [4] = 0xffffffff0200ffff,
-          [3] = 0xffffffff030100ff,
-          [2] = 0xffffffff04020100,
+      static __m64 shuffles[] = {
+          [7] = 0xffffffff0301ffff, [6] = 0xffffffff040201ff,
+          [5] = 0xffffffff05030201, [4] = 0xffffffff0200ffff,
+          [3] = 0xffffffff030100ff, [2] = 0xffffffff04020100,
       };
-      s32 sign = 1;
-      if (*begin == '-') {
-        sign = -1;
-        ++begin;
-      }
       __m64 block = ((__m64 *)begin)[0];
-      __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a0a);
-      u8 z = __builtin_clzll(c) >> 3;
-      u32 s =
-          (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll, shuffles[z]);
+      __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a2d);
+      u32 z = __builtin_clzll(c) >> 3;
+      u32 shift = ((u64)c & 0x02);
+      u32 shuf = z + (shift << 1);
+      u32 s = (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+                                         shuffles[shuf]);
       s32 a = ((s * 10) + (s >> 8));
       s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
-      n = sign * b;
+      n = (1 - shift) * b;
       begin += 8 - z;
-      ch = begin[-1];
     }
+    // {
+    //   __m64 shuffles[] = {
+    //       [4] = 0xffffffff0200ffff,
+    //       [3] = 0xffffffff030100ff,
+    //       [2] = 0xffffffff04020100,
+    //   };
+    //   s32 sign = 1;
+    //   if (*begin == '-') {
+    //     sign = -1;
+    //     ++begin;
+    //   }
+    //   __m64 block = ((__m64 *)begin)[0];
+    //   __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a0a);
+    //   u8 z = __builtin_clzll(c) >> 3;
+    //   u32 s =
+    //       (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+    //       shuffles[z]);
+    //   s32 a = ((s * 10) + (s >> 8));
+    //   s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
+    //   n = sign * b;
+    //   begin += 8 - z;
+    //   // ch = begin[-1];
+    // }
 
     // {
     //   static __m64 shuffles[] = {
@@ -307,7 +327,7 @@ void *process(void *vd) {
     //   n *= sign;
     //   ch = *begin++;
     // }
-    ASSERT(ch == '\n');
+    // ASSERT(ch == '\n');
 
     // if (s[index].count == 0) {
     //   printf("%s, %.*s, %d\n", keys[index], (s32)(line_end - line_begin),
@@ -330,9 +350,9 @@ void *process(void *vd) {
 s32 main(void) {
   // {
   //   static __m64 shuffles[] = {
-  //       [4] = 0xffffffff0200ffff,
-  //       [3] = 0xffffffff030100ff,
-  //       [2] = 0xffffffff04020100,
+  //       [7] = 0xffffffff0301ffff, [6] = 0xffffffff040201ff,
+  //       [5] = 0xffffffff05030201, [4] = 0xffffffff0200ffff,
+  //       [3] = 0xffffffff030100ff, [2] = 0xffffffff04020100,
   //   };
   //   //              |765432 10|
   //   c8 *buffer = "ab;3.5\nlkjsdflkj;";
@@ -341,22 +361,28 @@ s32 main(void) {
   //     ;
   //   printf("%c\n", *begin);
   //   __m64 block = ((__m64 *)begin)[0];
-  //   __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a0a);
+  //   __m64 c = __builtin_ia32_pcmpeqb(block, (__m64)0x0a0a0a0a0a0a0a2d);
   //   printf("%016lx\n", (u64)block);
   //   printf("%016lx\n", (u64)c);
   //   u8 z = __builtin_clzll(c) >> 3;
+  //   u8 shift = ((u64)c & 0x02);
+  //   s8 sign = 1 - shift;
+  //   u8 shuf = z + (shift << 1);
   //   printf("%d\n", z);
+  //   printf("shift=%d\n", shift);
+  //   printf("shuf=%d\n", shuf);
+  //   printf("%016llx\n", (u64)c & 0xffull);
+  //   printf("%d\n", sign);
 
-  //   u32 s =
-  //       (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
-  //       shuffles[z]);
+  //   u32 s = (u64)__builtin_ia32_pshufb(block & 0x0f0f0f0f0f0f0f0fll,
+  //                                      shuffles[shuf]);
   //   printf("%08x\n", s);
   //   s32 a = ((s * 10) + (s >> 8));
   //   s32 b = 100 * (a & 0xff) + ((a & 0xff0000) >> 16);
   //   // printf("%08x\n", (u32)((u64)s));
   //   printf("%08x\n", a);
   //   printf("%08x\n", b);
-  //   printf("%d\n", b);
+  //   printf("%d\n", b * sign);
   //   printf("next char %2s\n", begin + 8 - z);
   //   return 0;
   // }
